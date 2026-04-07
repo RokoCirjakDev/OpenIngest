@@ -11,7 +11,15 @@ dependencies = [
     "fastapi>=0.100",
     "uvicorn[standard]>=0.23",
     "python-multipart>=0.0.9",
+    "openai>=1.40.0",
+    "python-docx>=1.1.2",
+    "pymupdf>=1.25.0",
+    "pillow>=10.0.0",
+    "pytesseract>=0.3.10",
+    "oracledb>=2.5.0",
+    "PyYAML>=6.0.1",
 ]
 
 [project.scripts]
 openingest-serve = "OpenIngest.serve:app"
+openingest-ingest = "OpenIngest.ingest:main"

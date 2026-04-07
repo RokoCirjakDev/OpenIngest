@@ -17,6 +17,7 @@ const API_BASE = "http://localhost:8000"
 function DocIngestTab() {
   const fileRef = useRef<HTMLInputElement>(null)
   const [fileName, setFileName] = useState<string | null>(null)
+  const [appId, setAppId] = useState("1")
   const [extraInstructions, setExtraInstructions] = useState("")
   const [advancedOpen, setAdvancedOpen] = useState(false)
   const [status, setStatus] = useState<string | null>(null)
@@ -30,6 +31,7 @@ function DocIngestTab() {
     setStatus(null)
     const form = new FormData()
     form.append("file", file)
+    form.append("metadata", JSON.stringify({ app_id: appId }))
     form.append("extra_instructions", extraInstructions)
     try {
       const res = await fetch(`${API_BASE}/upload/doc`, {
@@ -44,7 +46,7 @@ function DocIngestTab() {
   }
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 flex flex-col items-center">
       {/* File picker */}
       <div>
         <input
@@ -74,6 +76,15 @@ function DocIngestTab() {
           </button>
         </CollapsibleTrigger>
         <CollapsibleContent className="pt-2">
+          <label className="block text-xs text-gray-500 mb-1">
+            App ID
+          </label>
+          <Input
+            placeholder="npr. 10"
+            value={appId}
+            onChange={(e) => setAppId(e.target.value)}
+            className="mb-2"
+          />
           <label className="block text-xs text-gray-500 mb-1">
             Extra Instructions
           </label>
@@ -136,7 +147,7 @@ function ManualIngestTab() {
   }
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 flex flex-col items-center">
       <Textarea
         placeholder="Enter text to ingest…"
         value={text}
@@ -184,7 +195,7 @@ export default function App() {
         OpenIngest
       </h1>
       <div className="w-full max-w-lg">
-        <Tabs defaultValue="doc">
+        <Tabs defaultValue="doc" className="w-full flex flex-col items-center">
           <TabsList>
             <TabsTrigger value="doc">Doc ingest</TabsTrigger>
             <TabsTrigger value="manual">Manual ingest</TabsTrigger>
