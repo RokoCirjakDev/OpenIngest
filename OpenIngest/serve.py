@@ -34,16 +34,25 @@ async def upload_doc(
     try:
         metadata_obj = json.loads(metadata) if metadata else {}
         if not isinstance(metadata_obj, dict):
-            metadata_obj = {}
-    except json.JSONDecodeError:
-        metadata_obj = {}
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid metadata payload: expected a JSON object at form field 'metadata'.",
+            )
+    except json.JSONDecodeError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid metadata payload: failed to parse JSON in form field 'metadata' ({type(exc).__name__}: {exc}).",
+        ) from exc
     if extra_instructions:
         metadata_obj.setdefault("extra_instructions", extra_instructions)
 
     try:
         stats = await run_in_threadpool(run_pipeline, temp_path, metadata_obj, config_path)
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=500,
+            detail=f"Pipeline failed for uploaded file '{file.filename or 'uploaded'}' ({type(exc).__name__}: {exc}).",
+        ) from exc
     finally:
         try:
             Path(temp_path).unlink(missing_ok=True)

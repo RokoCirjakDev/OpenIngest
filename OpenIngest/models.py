@@ -83,6 +83,15 @@ class ChildChunk:
     page_to: int | None = None
     pitanje: str | None = None
     odgovor: str | None = None
+    steps: list[str] = field(default_factory=list)
+    constraints: list[str] = field(default_factory=list)
+    prerequisites: list[str] = field(default_factory=list)
+    system_effects: list[str] = field(default_factory=list)
+    branches: list[str] = field(default_factory=list)
+    navigation_paths: list[str] = field(default_factory=list)
+    cross_system_refs: list[str] = field(default_factory=list)
+    error_scenarios: list[str] = field(default_factory=list)
+    emphasis_signals: list[str] = field(default_factory=list)
     embedding_input: str | None = None
     embedding: list[float] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
@@ -125,6 +134,15 @@ class ChunkRecordText:
     content: str = ""
     summary: str | None = None
     q: str | None = None
+    steps: list[str] = field(default_factory=list)
+    constraints: list[str] = field(default_factory=list)
+    prerequisites: list[str] = field(default_factory=list)
+    system_effects: list[str] = field(default_factory=list)
+    branches: list[str] = field(default_factory=list)
+    navigation_paths: list[str] = field(default_factory=list)
+    cross_system_refs: list[str] = field(default_factory=list)
+    error_scenarios: list[str] = field(default_factory=list)
+    emphasis_signals: list[str] = field(default_factory=list)
 
 
 @dataclass(slots=True)

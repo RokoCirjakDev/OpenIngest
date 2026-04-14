@@ -19,13 +19,17 @@ class StructureChunker(Chunker):
     ) -> ChunkingResult:
         parents: list[ParentTaskSection] = []
         current_blocks: list[StructuredBlock] = []
-        current_title = "Document"
+        current_title: str | None = None
         current_breadcrumbs: list[str] = []
 
         def flush() -> None:
             nonlocal current_blocks, current_title, current_breadcrumbs
             if not current_blocks:
                 return
+            if current_title is None:
+                raise ValueError(
+                    f"Cannot flush structure chunk for document {doc_id}: no heading was recorded for the current block group."
+                )
             page_from_values = [block.page_from for block in current_blocks if block.page_from is not None]
             page_to_values = [block.page_to for block in current_blocks if block.page_to is not None]
             text = "\n".join(block.text for block in current_blocks if block.text.strip())
@@ -53,5 +57,9 @@ class StructureChunker(Chunker):
             current_blocks.append(block)
 
         flush()
+        if not parents:
+            raise ValueError(
+                f"Structure chunking produced no parent sections for document {doc_id}; no heading/content groups were detected."
+            )
         chunks = build_child_chunks(parents, settings)
         return ChunkingResult(parents=parents, chunks=chunks)

@@ -7,7 +7,7 @@ from uuid import uuid4
 from OpenIngest.chunking import compute_breadcrumbs, get_chunker, merge_image_descriptions
 from OpenIngest.config import PipelineConfig, load_config
 from OpenIngest.embed import embed_child_chunks
-from OpenIngest.enrich import enrich_images_with_vision, enrich_parent_sections
+from OpenIngest.enrich import enrich_chunks, enrich_images_with_vision
 from OpenIngest.extractors import extract_docx, extract_pdf
 from OpenIngest.models import (
     ChildChunk,
@@ -37,10 +37,12 @@ class PipelineRunner:
         kind = (self.config.writer.kind or "oracle23ai").lower()
         if kind == "jsonl":
             output_path = self.config.writer.mapping.get("output_path", "ingest-debug.jsonl")
-            return JsonlWriter(str(output_path))
+            return JsonlWriter(str(output_path), cleanprint=bool(self.config.writer.cleanprint))
         if kind in {"oracle", "oracle23ai"}:
             return Oracle23aiWriter(self.config)
-        raise ValueError(f"Unsupported writer kind: {self.config.writer.kind}")
+        raise ValueError(
+            f"Unsupported writer kind '{self.config.writer.kind}'. Supported values are 'jsonl', 'oracle', and 'oracle23ai'."
+        )
 
     def _source_type(self, file_path: str) -> str:
         return Path(file_path).suffix.lower().lstrip(".") or "unknown"
@@ -51,7 +53,9 @@ class PipelineRunner:
             return extract_docx(file_path, metadata)
         if file_ext == ".pdf":
             return extract_pdf(file_path, metadata, self.config)
-        raise ValueError(f"Unsupported file type: {file_ext}")
+        raise ValueError(
+            f"Unsupported input file type '{file_ext}' for '{file_path}'. Only .docx and .pdf files are accepted."
+        )
 
     def _to_state(self, extraction: ExtractionResult) -> PipelineState:
         source = SourceDocument(
@@ -85,6 +89,38 @@ class PipelineRunner:
         records: list[ChunkRecord] = []
         for chunk in chunks:
             parent = parent_map[chunk.section_id]
+            if not chunk.pitanje:
+                raise ValueError(
+                    f"Cannot build record for chunk {chunk.chunk_id}: chunk.question is missing for section {parent.section_id}."
+                )
+            if not chunk.odgovor:
+                raise ValueError(
+                    f"Cannot build record for chunk {chunk.chunk_id}: chunk.summary is missing for section {parent.section_id}."
+                )
+            if not isinstance(chunk.steps, list):
+                raise ValueError(
+                    f"Cannot build record for chunk {chunk.chunk_id}: chunk.steps must be a list for section {parent.section_id}."
+                )
+            operational_lists = {
+                "constraints": chunk.constraints,
+                "prerequisites": chunk.prerequisites,
+                "system_effects": chunk.system_effects,
+                "branches": chunk.branches,
+                "navigation_paths": chunk.navigation_paths,
+                "cross_system_refs": chunk.cross_system_refs,
+                "error_scenarios": chunk.error_scenarios,
+                "emphasis_signals": chunk.emphasis_signals,
+            }
+            for field_name, value in operational_lists.items():
+                if not isinstance(value, list):
+                    raise ValueError(
+                        f"Cannot build record for chunk {chunk.chunk_id}: chunk.{field_name} must be a list for section {parent.section_id}."
+                    )
+            chunk_keywords = chunk.metadata.get("keywords")
+            if not isinstance(chunk_keywords, list) or not chunk_keywords:
+                raise ValueError(
+                    f"Cannot build record for chunk {chunk.chunk_id}: missing chunk-level keywords in chunk metadata for section {parent.section_id}."
+                )
             record = ChunkRecord(
                 record_id=str(uuid4()),
                 source=ChunkRecordSource(
@@ -103,13 +139,22 @@ class PipelineRunner:
                     title=parent.title,
                     breadcrumbs=list(chunk.breadcrumbs or parent.breadcrumbs),
                     content=chunk.chunk_text,
-                    summary=chunk.odgovor or parent.odgovor,
-                    q=chunk.pitanje or parent.pitanje,
+                    summary=chunk.odgovor,
+                    q=chunk.pitanje,
+                    steps=list(chunk.steps),
+                    constraints=list(chunk.constraints),
+                    prerequisites=list(chunk.prerequisites),
+                    system_effects=list(chunk.system_effects),
+                    branches=list(chunk.branches),
+                    navigation_paths=list(chunk.navigation_paths),
+                    cross_system_refs=list(chunk.cross_system_refs),
+                    error_scenarios=list(chunk.error_scenarios),
+                    emphasis_signals=list(chunk.emphasis_signals),
                 ),
                 metadata={
                     **source.metadata,
                     "section_id": parent.section_id,
-                    "keywords": parent.keywords,
+                    "keywords": chunk_keywords,
                 },
                 embedding=ChunkRecordEmbedding(
                     vector=list(chunk.embedding),
@@ -118,6 +163,14 @@ class PipelineRunner:
                 ),
             )
             records.append(record)
+
+        if len(records) > 1:
+            keyword_signatures = {tuple(record.metadata.get("keywords", [])) for record in records}
+            if len(keyword_signatures) == 1:
+                only_keywords = next(iter(keyword_signatures))
+                raise ValueError(
+                    f"All {len(records)} records produced the same keywords {list(only_keywords)}; keywords must not be identical across every entry."
+                )
         return records
 
     def run(self, file_path: str, metadata: dict[str, object] | None = None) -> IngestStats:
@@ -151,9 +204,10 @@ class PipelineRunner:
             metadata=state.source.metadata,
             settings=self.config,
         )
-        parents = enrich_parent_sections(chunking_result.parents, self.config)
+        parents = chunking_result.parents
         chunks = chunking_result.chunks
-        chunks = embed_child_chunks(chunks, parents, self.config)
+        chunks = enrich_chunks(chunks, parents, self.config)
+        chunks = embed_child_chunks(chunks, self.config)
         records = self._to_records(chunks, parents, state.source)
         writer = self._build_writer()
         result: WriteResult = writer.write(records)

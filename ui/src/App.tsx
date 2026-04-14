@@ -21,14 +21,17 @@ function DocIngestTab() {
   const [extraInstructions, setExtraInstructions] = useState("")
   const [advancedOpen, setAdvancedOpen] = useState(false)
   const [status, setStatus] = useState<string | null>(null)
+  const [isUploading, setIsUploading] = useState(false)
 
   async function handleSubmit() {
+    if (isUploading) return
     const file = fileRef.current?.files?.[0]
     if (!file) {
       setStatus("Please select a file.")
       return
     }
-    setStatus(null)
+    setIsUploading(true)
+    setStatus("Uploading...")
     const form = new FormData()
     form.append("file", file)
     form.append("metadata", JSON.stringify({ app_id: appId }))
@@ -38,10 +41,24 @@ function DocIngestTab() {
         method: "POST",
         body: form,
       })
-      const json = await res.json()
-      setStatus(JSON.stringify(json))
+      const body = await res.text()
+      let parsed: unknown = body
+      try {
+        parsed = JSON.parse(body)
+      } catch {
+        // Keep raw text body when response isn't JSON.
+      }
+
+      if (!res.ok) {
+        setStatus(`Upload failed (${res.status}): ${typeof parsed === "string" ? parsed : JSON.stringify(parsed)}`)
+        return
+      }
+
+      setStatus(`Upload complete: ${typeof parsed === "string" ? parsed : JSON.stringify(parsed)}`)
     } catch (err) {
       setStatus(`Error: ${String(err)}`)
+    } finally {
+      setIsUploading(false)
     }
   }
 
@@ -97,10 +114,12 @@ function DocIngestTab() {
         </CollapsibleContent>
       </Collapsible>
 
-      <Button onClick={handleSubmit}>Upload</Button>
+      <Button onClick={handleSubmit} disabled={isUploading}>
+        {isUploading ? "Uploading..." : "Upload"}
+      </Button>
 
       {status && (
-        <p className="text-xs text-gray-600 break-all">{status}</p>
+        <p className="text-xs text-gray-600 break-all" aria-live="polite">{status}</p>
       )}
     </div>
   )
@@ -115,6 +134,7 @@ function ManualIngestTab() {
   const [rows, setRows] = useState<MetaRow[]>([])
   const [nextId, setNextId] = useState(0)
   const [status, setStatus] = useState<string | null>(null)
+  const [isSubmitting, setIsSubmitting] = useState(false)
 
   function addRow() {
     setRows((prev) => [...prev, { id: nextId, key: "", value: "" }])
@@ -128,7 +148,9 @@ function ManualIngestTab() {
   }
 
   async function handleSubmit() {
-    setStatus(null)
+    if (isSubmitting) return
+    setIsSubmitting(true)
+    setStatus("Submitting...")
     const metadata: Record<string, string> = {}
     for (const row of rows) {
       if (row.key) metadata[row.key] = row.value
@@ -139,10 +161,24 @@ function ManualIngestTab() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ text, metadata }),
       })
-      const json = await res.json()
-      setStatus(JSON.stringify(json))
+      const body = await res.text()
+      let parsed: unknown = body
+      try {
+        parsed = JSON.parse(body)
+      } catch {
+        // Keep raw text body when response isn't JSON.
+      }
+
+      if (!res.ok) {
+        setStatus(`Submit failed (${res.status}): ${typeof parsed === "string" ? parsed : JSON.stringify(parsed)}`)
+        return
+      }
+
+      setStatus(`Submit complete: ${typeof parsed === "string" ? parsed : JSON.stringify(parsed)}`)
     } catch (err) {
       setStatus(`Error: ${String(err)}`)
+    } finally {
+      setIsSubmitting(false)
     }
   }
 
@@ -177,10 +213,12 @@ function ManualIngestTab() {
         </Button>
       </div>
 
-      <Button onClick={handleSubmit}>Submit</Button>
+      <Button onClick={handleSubmit} disabled={isSubmitting}>
+        {isSubmitting ? "Submitting..." : "Submit"}
+      </Button>
 
       {status && (
-        <p className="text-xs text-gray-600 break-all">{status}</p>
+        <p className="text-xs text-gray-600 break-all" aria-live="polite">{status}</p>
       )}
     </div>
   )

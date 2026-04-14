@@ -58,7 +58,12 @@ def _vision_one(
             ],
             temperature=0.2,
         )
-        return (response.output_text or "").strip()
+        content = (response.output_text or "").strip()
+        if not content:
+            raise ValueError(
+                f"Vision enrichment returned empty output for image {image.image_id} in document '{doc_title}'."
+            )
+        return content
 
     return retry_with_backoff(
         _call,
@@ -81,7 +86,7 @@ def enrich_images_with_vision(
         return []
 
     if not settings.openai_api_key:
-        raise ValueError("OPENAI_API_KEY is required for vision enrichment")
+        raise ValueError("Vision enrichment cannot run because OPENAI_API_KEY is not set in the current environment or config.")
 
     client = OpenAI(api_key=settings.openai_api_key)
     cache = JsonStateStore(settings.image_cache_path)

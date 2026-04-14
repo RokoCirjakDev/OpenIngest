@@ -33,12 +33,19 @@ class Oracle23aiWriter(Writer):
 
     def _connect(self):
         if not self.config.oracle_user or not self.config.oracle_password or not self.config.oracle_dsn:
-            raise ValueError("Oracle credentials are required: ORACLE_USER, ORACLE_PASSWORD, ORACLE_DSN")
-        return oracledb.connect(
-            user=self.config.oracle_user,
-            password=self.config.oracle_password,
-            dsn=self.config.oracle_dsn,
-        )
+            raise ValueError(
+                "Oracle connection cannot be created because ORACLE_USER, ORACLE_PASSWORD, or ORACLE_DSN is missing from the active configuration."
+            )
+        try:
+            return oracledb.connect(
+                user=self.config.oracle_user,
+                password=self.config.oracle_password,
+                dsn=self.config.oracle_dsn,
+            )
+        except Exception as exc:
+            raise RuntimeError(
+                f"Failed to connect to Oracle DSN '{self.config.oracle_dsn}' as user '{self.config.oracle_user}' ({type(exc).__name__}: {exc})."
+            ) from exc
 
     def _map_record(self, record: ChunkRecord) -> dict[str, Any]:
         base = asdict(record)
@@ -66,12 +73,17 @@ class Oracle23aiWriter(Writer):
         bind_sql = ", ".join("TO_VECTOR(:EMBEDDING)" if col == "EMBEDDING" else f":{col}" for col in columns)
         insert_sql = f"INSERT INTO {self.config.oracle_table} ({', '.join(columns)}) VALUES ({bind_sql})"
 
-        with self._connect() as conn:
-            with conn.cursor() as cursor:
-                for start in range(0, len(bound_records), self.config.oracle_batch_size):
-                    batch = bound_records[start : start + self.config.oracle_batch_size]
-                    cursor.executemany(insert_sql, batch)
-            conn.commit()
+        try:
+            with self._connect() as conn:
+                with conn.cursor() as cursor:
+                    for start in range(0, len(bound_records), self.config.oracle_batch_size):
+                        batch = bound_records[start : start + self.config.oracle_batch_size]
+                        cursor.executemany(insert_sql, batch)
+                conn.commit()
+        except Exception as exc:
+            raise RuntimeError(
+                f"Failed to write {len(bound_records)} records into Oracle table '{self.config.oracle_table}' ({type(exc).__name__}: {exc})."
+            ) from exc
 
         logger.info("Inserted %s records into %s", len(bound_records), self.config.oracle_table)
         return WriteResult(written=len(bound_records), destination="oracle23ai")

@@ -60,6 +60,7 @@ class EmbeddingConfig:
 @dataclass(slots=True)
 class WriterConfig:
     kind: str = DEFAULT_WRITER.kind
+    cleanprint: bool = DEFAULT_WRITER.cleanprint
     required_metadata_keys: list[str] = field(default_factory=list)
     mapping: dict[str, Any] = field(default_factory=lambda: dict(DEFAULT_WRITER.mapping))
 
@@ -128,6 +129,8 @@ def _build_config(data: dict[str, Any]) -> PipelineConfig:
     chunking = data.pop("chunking", {}) or {}
     embedding = data.pop("embedding", {}) or {}
     writer = data.pop("writer", {}) or {}
+    if "CLEANPRINT" in writer and "cleanprint" not in writer:
+        writer["cleanprint"] = writer.pop("CLEANPRINT")
     config = PipelineConfig(**data)
     config.enrichment = EnrichmentConfig(
         **enrichment,
@@ -178,10 +181,16 @@ def load_config(config_path: str | None = None) -> PipelineConfig:
         "oracle_dsn": os.getenv("ORACLE_DSN", base.get("oracle_dsn", "")),
         "oracle_table": os.getenv("ORACLE_TABLE", base.get("oracle_table", "RAG_CHUNKS")),
         "oracle_batch_size": int(os.getenv("ORACLE_BATCH_SIZE", str(base.get("oracle_batch_size", 50)))),
-        "chunk_target_tokens": int(os.getenv("OPENINGEST_CHUNK_TARGET_TOKENS", str(base.get("chunk_target_tokens", 450)))),
-        "chunk_min_tokens": int(os.getenv("OPENINGEST_CHUNK_MIN_TOKENS", str(base.get("chunk_min_tokens", 300)))),
-        "chunk_hard_cap_tokens": int(os.getenv("OPENINGEST_CHUNK_HARD_CAP_TOKENS", str(base.get("chunk_hard_cap_tokens", 600)))),
     }
+    base["chunking"]["target_tokens"] = int(
+        os.getenv("OPENINGEST_CHUNK_TARGET_TOKENS", str(base["chunking"].get("target_tokens", 450)))
+    )
+    base["chunking"]["min_tokens"] = int(
+        os.getenv("OPENINGEST_CHUNK_MIN_TOKENS", str(base["chunking"].get("min_tokens", 300)))
+    )
+    base["chunking"]["hard_cap_tokens"] = int(
+        os.getenv("OPENINGEST_CHUNK_HARD_CAP_TOKENS", str(base["chunking"].get("hard_cap_tokens", 600)))
+    )
     base["chunking"]["task_heading_prefixes"] = _env_tuple("OPENINGEST_TASK_HEADING_PREFIXES", tuple(base["chunking"].get("task_heading_prefixes", ())))
     base["chunking"]["prereq_keywords"] = _env_tuple("OPENINGEST_PREREQ_KEYWORDS", tuple(base["chunking"].get("prereq_keywords", ())))
     base["chunking"]["troubleshooting_keywords"] = _env_tuple("OPENINGEST_TROUBLESHOOTING_KEYWORDS", tuple(base["chunking"].get("troubleshooting_keywords", ())))

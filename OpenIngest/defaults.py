@@ -7,7 +7,11 @@ from typing import Literal
 @dataclass(slots=True)
 class PromptDefaults:
     image_caption: str = "Describe the image in the document in the same language as the source document."
-    summarize: str = "Write a concise answer summary for the following section in the same language as the source document."
+    summarize: str = (
+        "Generate a knowledgeable explanation in 2-4 sentences that directly answers the user's intent, "
+        "without listing explicit numbered steps inside the summary. "
+        "If the chunk is informational and contains no actionable sequence, keep the steps array empty."
+    )
     synthetic_questions: str = "Create a search-friendly question that matches the intent of the section."
 
 
@@ -55,6 +59,7 @@ class EmbeddingDefaults:
 @dataclass(slots=True)
 class WriterDefaults:
     kind: str = "jsonl"
+    cleanprint: bool = True
     required_metadata_keys: list[str] = field(default_factory=list)
     mapping: dict[str, str] = field(default_factory=lambda: {
         "PITANJE": "text.q",

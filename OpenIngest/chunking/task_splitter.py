@@ -4,7 +4,6 @@ import re
 from uuid import uuid4
 
 from OpenIngest.config import Settings
-from OpenIngest.defaults import DEFAULT_CHUNKING
 from OpenIngest.models import ChildChunk, ExtractedImage, ParentTaskSection, StructuredBlock
 from OpenIngest.utils import estimate_tokens
 
@@ -17,7 +16,15 @@ def merge_image_descriptions(blocks: list[StructuredBlock], images: list[Extract
             merged.append(block)
             continue
         image = image_map.get(block.anchor_image_id)
-        vision_text = (image.vision_text if image else "") or "Slika bez opisa."
+        if image is None:
+            raise ValueError(
+                f"Cannot merge image description for anchor {block.anchor_image_id}: no matching extracted image was found."
+            )
+        if not image.vision_text or not image.vision_text.strip():
+            raise ValueError(
+                f"Cannot merge image description for anchor {block.anchor_image_id}: vision enrichment returned empty text."
+            )
+        vision_text = image.vision_text.strip()
         merged.append(
             StructuredBlock(
                 block_id=str(uuid4()),
@@ -63,7 +70,7 @@ def detect_parent_sections(
         return []
 
     sections: list[ParentTaskSection] = []
-    current_title = "Opći postupak"
+    current_title: str | None = None
     current_blocks: list[StructuredBlock] = []
     current_breadcrumbs: list[str] = []
 
@@ -71,6 +78,10 @@ def detect_parent_sections(
         nonlocal current_blocks, current_title, current_breadcrumbs
         if not current_blocks:
             return
+        if current_title is None:
+            raise ValueError(
+                f"Cannot flush parent section for document {doc_id}: no section heading was captured before the first content block."
+            )
         page_from_values = [block.page_from for block in current_blocks if block.page_from is not None]
         page_to_values = [block.page_to for block in current_blocks if block.page_to is not None]
         text = "\n".join(block.text for block in current_blocks if block.text.strip())
@@ -89,14 +100,9 @@ def detect_parent_sections(
         current_blocks = []
 
     for block in document_blocks:
-        starts_task = _is_task_heading(block, settings)
-        if starts_task and current_blocks:
-            _flush()
-            current_title = block.text
-            current_breadcrumbs = [part for part in (block.breadcrumbs or "").split(" > ") if part]
-            continue
-
-        if block.type == "heading" and not current_blocks:
+        if block.type == "heading":
+            if current_blocks:
+                _flush()
             current_title = block.text
             current_breadcrumbs = [part for part in (block.breadcrumbs or "").split(" > ") if part]
             continue
@@ -104,6 +110,10 @@ def detect_parent_sections(
         current_blocks.append(block)
 
     _flush()
+    if not sections:
+        raise ValueError(
+            f"No parent sections were detected for document {doc_id}; the document may not contain any recognizable headings or task sections."
+        )
     return sections
 
 
@@ -127,15 +137,16 @@ def _chunk_lines_with_overlap(lines: list[str], settings: Settings) -> list[list
 
     for line in lines:
         line_tokens = estimate_tokens(line)
-        if current and current_tokens + line_tokens > settings.chunk_hard_cap_tokens:
+        if current and current_tokens + line_tokens > settings.chunking.hard_cap_tokens:
             chunks.append(current)
-            overlap = current[-2:] if len(current) > 2 else current[-1:]
+            overlap_steps = max(0, settings.chunking.overlap_steps)
+            overlap = current[-overlap_steps:] if overlap_steps else []
             current = overlap + [line]
             current_tokens = sum(estimate_tokens(item) for item in current)
             continue
         current.append(line)
         current_tokens += line_tokens
-        if current_tokens >= settings.chunk_target_tokens:
+        if current_tokens >= settings.chunking.target_tokens:
             chunks.append(current)
             current = []
             current_tokens = 0

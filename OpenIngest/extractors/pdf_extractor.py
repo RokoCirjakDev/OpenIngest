@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from io import BytesIO
 from pathlib import Path
+import re
 from uuid import uuid4
 
 import fitz
@@ -16,6 +17,30 @@ try:
 except ImportError:
     pytesseract = None
     Image = None
+
+
+_KEY_ACTION_PATTERN = re.compile(r"\b(F\d{1,2}|TAB|ENTER|ESC|CTRL\+[A-Z]|ALT\+[A-Z]|SHIFT\+[A-Z]|N)\b", re.IGNORECASE)
+_CONSTRAINT_PATTERN = re.compile(
+    r"\b(mora|morate|mora biti|neće dopustiti|nije dopušteno|samo ako|samo|uvjet|obavezno|sumaran iznos)\b",
+    re.IGNORECASE,
+)
+
+
+def _infer_text_block_type(line: str) -> str:
+    text = line.strip()
+    if not text:
+        return "paragraph"
+    if re.match(r"^\d+(?:\.\d+)*[\.)]?\s+", text):
+        return "list_item"
+    if " > " in text or "→" in text:
+        return "note"
+    if _KEY_ACTION_PATTERN.search(text):
+        return "note"
+    if _CONSTRAINT_PATTERN.search(text):
+        return "note"
+    if text.isupper() and len(text.split()) <= 10:
+        return "heading"
+    return "paragraph"
 
 
 def _ocr_page_if_needed(page: fitz.Page, text_exists: bool, ocr_language: str) -> str:
@@ -57,19 +82,19 @@ def extract_pdf(
                     line_text = "".join(spans).strip()
                     if line_text:
                         lines.append(line_text)
-                text = "\n".join(lines).strip()
-                if not text:
+                if not lines:
                     continue
                 page_has_text = True
-                blocks.append(
-                    StructuredBlock(
-                        block_id=str(uuid4()),
-                        type="paragraph",
-                        text=text,
-                        page_from=page_num,
-                        page_to=page_num,
+                for line_text in lines:
+                    blocks.append(
+                        StructuredBlock(
+                            block_id=str(uuid4()),
+                            type=_infer_text_block_type(line_text),
+                            text=line_text,
+                            page_from=page_num,
+                            page_to=page_num,
+                        )
                     )
-                )
                 continue
 
             if block_type == 1:

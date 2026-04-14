@@ -17,9 +17,14 @@ def main() -> None:
     args = build_arg_parser().parse_args()
     import json
 
-    metadata = json.loads(args.metadata) if args.metadata else {}
+    try:
+        metadata = json.loads(args.metadata) if args.metadata else {}
+    except json.JSONDecodeError as exc:
+        raise ValueError(
+            f"Invalid metadata JSON passed to --metadata ({type(exc).__name__}: {exc})."
+        ) from exc
     if not isinstance(metadata, dict):
-        metadata = {}
+        raise ValueError("Invalid metadata JSON passed to --metadata: expected a JSON object.")
     stats = run_pipeline(args.path, metadata, args.config)
     print(
         {
