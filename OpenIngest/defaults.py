@@ -19,6 +19,24 @@ class PromptDefaults:
 class EnrichmentDefaults:
     language: str = "auto"
     prompt: PromptDefaults = field(default_factory=PromptDefaults)
+    custom_fields: list[dict[str, object]] = field(
+        default_factory=lambda: [
+            {
+                "name": "app_id",
+                "type": "enum",
+                "description": [
+                    "Classify the application identifier used by this chunk, if its a multi app workflow, clasify it as the one in which it begins in.",
+                    "Aplikacija Likvidatura (ID=12) prvenstveno služi za upravljanje ulaznim računima (URA), što uključuje postupke storniranja neplaćenih i plaćenih računa te preknjiženja računa za korisnike izvan sustava riznice. Kroz ovaj modul korisnici rješavaju neravnoteže između iznosa računa i virmana kod povrata te mogu mijenjati pozicije na originalnom računu za potrebe ispravaka",
+                    "Aplikacija Nalozi (ID=31) omogućava otvaranje i provedbu platnih naloga koji su podijeljeni u tri glavne vrste: obračuni, ulazni računi (URA) i preknjižbe. Unutar modula korisnici mogu dodavati ili izbacivati račune iz naloga, prenositi podatke o isplatama u knjigu te vršiti složena preknjiženja, poput povezivanja i zatvaranja isplaćenog predujma s odgovarajućom urom.",
+                    "Aplikacija Financije (ID=16) predstavlja sustav glavne knjige u kojem se obrađuju izvodi, provode povrati dobavljača na temeljnici izvoda te ispravljaju greške u analitici. Aplikacija nudi napredne alate za manipulaciju prihodima s izvoda, uključujući podjelu jedne uplate na dva različita prihoda, promjene prihoda s ostavljanjem traga transakcije ili bez njega te rješavanje uplata koje ne trebaju proći analitiku."
+                    #"Random aplikacija koje nema u ovom dokumentu",
+                    "Return exactly one of the configured enum values.",
+                ],
+                "required": True,
+                "options": ["12", "31", "16"],
+            }
+        ]
+    )
 
 
 @dataclass(slots=True)

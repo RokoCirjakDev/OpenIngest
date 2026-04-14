@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
-from dataclasses import asdict
+import os
 from typing import Any
 
 import oracledb
@@ -13,6 +13,42 @@ from OpenIngest.writers.base import WriteResult, Writer
 
 
 logger = logging.getLogger("openingest.writers.oracle23ai")
+
+
+DEFAULT_TABLE = "RAGTEST1"
+LEGACY_TABLE = "RAG_CHUNKS"
+
+COLUMNS: tuple[str, ...] = (
+    "RECORD_ID",
+    "DOC_ID",
+    "SECTION_ID",
+    "CHUNK_ID",
+    "CHUNK_TYPE",
+    "SOURCE_URI",
+    "SOURCE_TYPE",
+    "PAGE_FROM",
+    "PAGE_TO",
+    "TITLE",
+    "BREADCRUMBS",
+    "PITANJE",
+    "ODGOVOR",
+    "KONTEKST",
+    "STEPS_JSON",
+    "CONSTRAINTS_JSON",
+    "PREREQUISITES_JSON",
+    "SYSTEM_EFFECTS_JSON",
+    "BRANCHES_JSON",
+    "NAVIGATION_PATHS_JSON",
+    "CROSS_SYSTEM_REFS_JSON",
+    "ERROR_SCENARIOS_JSON",
+    "EMPHASIS_SIGNALS_JSON",
+    "CUSTOM_FIELDS_JSON",
+    "METADATA_JSON",
+    "EMBEDDING_MODEL",
+    "EMBEDDING_INPUT",
+    "APLIKACIJA",
+    "EMBEDDING",
+)
 
 
 def _get_path(value: Any, path: str) -> Any:
@@ -27,51 +63,109 @@ def _get_path(value: Any, path: str) -> Any:
     return current
 
 
+def _as_json(value: Any) -> str | None:
+    if value is None:
+        return None
+    return json.dumps(value, ensure_ascii=False)
+
+
+def _to_int_or_none(value: Any) -> int | None:
+    if value is None:
+        return None
+    try:
+        return int(str(value).strip())
+    except (TypeError, ValueError):
+        return None
+
+
 class Oracle23aiWriter(Writer):
     def __init__(self, config: PipelineConfig) -> None:
         self.config = config
 
+    def _table_name(self) -> str:
+        table_name = (self.config.oracle_table or "").strip()
+        if not table_name or table_name.upper() == LEGACY_TABLE:
+            return DEFAULT_TABLE
+        return table_name
+
     def _connect(self):
-        if not self.config.oracle_user or not self.config.oracle_password or not self.config.oracle_dsn:
+        user = (self.config.oracle_user or os.getenv("ORACLE_USER", "")).strip()
+        password = (self.config.oracle_password or os.getenv("ORACLE_PASSWORD", "")).strip()
+        dsn = (
+            self.config.oracle_dsn
+            or os.getenv("ORACLE_DNS", "")
+            or os.getenv("ORACLE_DSN", "")
+        ).strip()
+
+        if not user or not password or not dsn:
             raise ValueError(
-                "Oracle connection cannot be created because ORACLE_USER, ORACLE_PASSWORD, or ORACLE_DSN is missing from the active configuration."
+                "Oracle connection cannot be created because ORACLE_USER, ORACLE_PASSWORD, or ORACLE_DNS/ORACLE_DSN is missing."
             )
         try:
             return oracledb.connect(
-                user=self.config.oracle_user,
-                password=self.config.oracle_password,
-                dsn=self.config.oracle_dsn,
+                user=user,
+                password=password,
+                dsn=dsn,
             )
         except Exception as exc:
             raise RuntimeError(
-                f"Failed to connect to Oracle DSN '{self.config.oracle_dsn}' as user '{self.config.oracle_user}' ({type(exc).__name__}: {exc})."
+                f"Failed to connect to Oracle DSN '{dsn}' as user '{user}' ({type(exc).__name__}: {exc})."
             ) from exc
 
     def _map_record(self, record: ChunkRecord) -> dict[str, Any]:
-        base = asdict(record)
-        bound: dict[str, Any] = {}
-        mapping = self.config.writer.mapping or {
-            "PITANJE": "text.q",
-            "ODGOVOR": "text.summary",
-            "KONTEKST": "text.content",
-            "APP_ID": "metadata.app_id",
-            "EMBEDDING": "embedding.vector",
+        app_from_custom = _get_path(record.text.custom_fields, "app_id")
+        app_from_metadata = _get_path(record.metadata, "app_id")
+        aplikacija = _to_int_or_none(app_from_custom)
+        if aplikacija is None:
+            aplikacija = _to_int_or_none(app_from_metadata)
+
+        embedding_payload = _as_json(record.embedding.vector) if record.embedding.vector else None
+
+        return {
+            "RECORD_ID": record.record_id,
+            "DOC_ID": record.source.doc_id,
+            "SECTION_ID": record.unit.parent_id,
+            "CHUNK_ID": record.unit.chunk_id,
+            "CHUNK_TYPE": record.unit.chunk_type,
+            "SOURCE_URI": record.source.uri,
+            "SOURCE_TYPE": record.source.type,
+            "PAGE_FROM": record.source.page_from,
+            "PAGE_TO": record.source.page_to,
+            "TITLE": record.text.title,
+            "BREADCRUMBS": _as_json(record.text.breadcrumbs),
+            "PITANJE": record.text.q,
+            "ODGOVOR": record.text.summary,
+            "KONTEKST": record.text.content,
+            "STEPS_JSON": _as_json(record.text.steps),
+            "CONSTRAINTS_JSON": _as_json(record.text.constraints),
+            "PREREQUISITES_JSON": _as_json(record.text.prerequisites),
+            "SYSTEM_EFFECTS_JSON": _as_json(record.text.system_effects),
+            "BRANCHES_JSON": _as_json(record.text.branches),
+            "NAVIGATION_PATHS_JSON": _as_json(record.text.navigation_paths),
+            "CROSS_SYSTEM_REFS_JSON": _as_json(record.text.cross_system_refs),
+            "ERROR_SCENARIOS_JSON": _as_json(record.text.error_scenarios),
+            "EMPHASIS_SIGNALS_JSON": _as_json(record.text.emphasis_signals),
+            "CUSTOM_FIELDS_JSON": _as_json(record.text.custom_fields),
+            "METADATA_JSON": _as_json(record.metadata),
+            "EMBEDDING_MODEL": record.embedding.model,
+            "EMBEDDING_INPUT": record.embedding.input_text,
+            "APLIKACIJA": aplikacija,
+            "EMBEDDING": embedding_payload,
         }
-        for destination, source in mapping.items():
-            value = _get_path(base, source) if isinstance(source, str) else source
-            if destination == "EMBEDDING" and isinstance(value, list):
-                value = json.dumps(value)
-            bound[destination] = value
-        return bound
 
     def write(self, records: list[ChunkRecord]) -> WriteResult:
+        table_name = self._table_name()
         if not records:
-            return WriteResult(destination="oracle23ai")
+            return WriteResult(destination=table_name)
 
         bound_records = [self._map_record(record) for record in records]
-        columns = list(bound_records[0].keys())
-        bind_sql = ", ".join("TO_VECTOR(:EMBEDDING)" if col == "EMBEDDING" else f":{col}" for col in columns)
-        insert_sql = f"INSERT INTO {self.config.oracle_table} ({', '.join(columns)}) VALUES ({bind_sql})"
+        bind_sql = ", ".join(
+            "CASE WHEN :EMBEDDING IS NULL THEN NULL ELSE TO_VECTOR(:EMBEDDING) END"
+            if col == "EMBEDDING"
+            else f":{col}"
+            for col in COLUMNS
+        )
+        insert_sql = f"INSERT INTO {table_name} ({', '.join(COLUMNS)}) VALUES ({bind_sql})"
 
         try:
             with self._connect() as conn:
@@ -82,8 +176,8 @@ class Oracle23aiWriter(Writer):
                 conn.commit()
         except Exception as exc:
             raise RuntimeError(
-                f"Failed to write {len(bound_records)} records into Oracle table '{self.config.oracle_table}' ({type(exc).__name__}: {exc})."
+                f"Failed to write {len(bound_records)} records into Oracle table '{table_name}' ({type(exc).__name__}: {exc})."
             ) from exc
 
-        logger.info("Inserted %s records into %s", len(bound_records), self.config.oracle_table)
-        return WriteResult(written=len(bound_records), destination="oracle23ai")
+        logger.info("Inserted %s records into %s", len(bound_records), table_name)
+        return WriteResult(written=len(bound_records), destination=table_name)

@@ -92,6 +92,7 @@ class ChildChunk:
     cross_system_refs: list[str] = field(default_factory=list)
     error_scenarios: list[str] = field(default_factory=list)
     emphasis_signals: list[str] = field(default_factory=list)
+    custom_fields: dict[str, str | list[str]] = field(default_factory=dict)
     embedding_input: str | None = None
     embedding: list[float] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
@@ -143,6 +144,7 @@ class ChunkRecordText:
     cross_system_refs: list[str] = field(default_factory=list)
     error_scenarios: list[str] = field(default_factory=list)
     emphasis_signals: list[str] = field(default_factory=list)
+    custom_fields: dict[str, str | list[str]] = field(default_factory=dict)
 
 
 @dataclass(slots=True)

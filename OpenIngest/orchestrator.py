@@ -121,6 +121,10 @@ class PipelineRunner:
                 raise ValueError(
                     f"Cannot build record for chunk {chunk.chunk_id}: missing chunk-level keywords in chunk metadata for section {parent.section_id}."
                 )
+            if not isinstance(chunk.custom_fields, dict):
+                raise ValueError(
+                    f"Cannot build record for chunk {chunk.chunk_id}: chunk.custom_fields must be a dictionary for section {parent.section_id}."
+                )
             record = ChunkRecord(
                 record_id=str(uuid4()),
                 source=ChunkRecordSource(
@@ -150,6 +154,7 @@ class PipelineRunner:
                     cross_system_refs=list(chunk.cross_system_refs),
                     error_scenarios=list(chunk.error_scenarios),
                     emphasis_signals=list(chunk.emphasis_signals),
+                    custom_fields=dict(chunk.custom_fields),
                 ),
                 metadata={
                     **source.metadata,

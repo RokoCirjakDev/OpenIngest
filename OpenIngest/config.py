@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from dataclasses import dataclass, field, fields, is_dataclass
 from pathlib import Path
 from typing import Any, Literal
@@ -21,6 +22,18 @@ class PromptConfig:
     synthetic_questions: str = DEFAULT_ENRICHMENT.prompt.synthetic_questions
 
 
+CustomSummarizerFieldType = Literal["enum", "freelist", "freeparagraph"]
+
+
+@dataclass(slots=True)
+class CustomSummarizerFieldConfig:
+    name: str
+    type: CustomSummarizerFieldType
+    description: str | list[str]
+    required: bool = False
+    options: list[str] = field(default_factory=list)
+
+
 @dataclass(slots=True)
 class EnrichmentConfig:
     language: str = DEFAULT_ENRICHMENT.language
@@ -30,6 +43,9 @@ class EnrichmentConfig:
     keywords_enabled: bool = True
     generate_queries_count: int = 1
     prompt: PromptConfig = field(default_factory=PromptConfig)
+    custom_fields: list[CustomSummarizerFieldConfig] = field(
+        default_factory=lambda: _build_custom_fields(DEFAULT_ENRICHMENT.custom_fields)
+    )
 
 
 @dataclass(slots=True)
@@ -118,14 +134,99 @@ def _deep_update(target: dict[str, Any], source: dict[str, Any]) -> dict[str, An
 
 
 def _asdict_dataclass(obj: Any) -> dict[str, Any]:
+    if isinstance(obj, list):
+        return [_asdict_dataclass(item) for item in obj]
+    if isinstance(obj, tuple):
+        return tuple(_asdict_dataclass(item) for item in obj)
+    if isinstance(obj, dict):
+        return {key: _asdict_dataclass(value) for key, value in obj.items()}
     if not is_dataclass(obj):
         return obj
     return {f.name: _asdict_dataclass(getattr(obj, f.name)) for f in fields(obj)}
 
 
+_CUSTOM_FIELD_NAME_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+_RESERVED_SUMMARY_KEYS = {
+    "PITANJE",
+    "ODGOVOR",
+    "STEPS",
+    "KEYWORDS",
+    "CONSTRAINTS",
+    "PREREQUISITES",
+    "SYSTEM_EFFECTS",
+    "BRANCHES",
+    "NAVIGATION_PATHS",
+    "CROSS_SYSTEM_REFS",
+    "ERROR_SCENARIOS",
+    "EMPHASIS_SIGNALS",
+}
+
+
+def _build_custom_fields(raw_items: Any) -> list[CustomSummarizerFieldConfig]:
+    if not isinstance(raw_items, list):
+        raise ValueError("enrichment.custom_fields must be a list of field declarations.")
+    for index, item in enumerate(raw_items):
+        if not isinstance(item, dict):
+            raise ValueError(
+                f"Invalid enrichment.custom_fields[{index}] entry: expected an object with name/type/description."
+            )
+    custom_fields = [CustomSummarizerFieldConfig(**item) for item in raw_items]
+    seen_names: set[str] = set()
+
+    for custom_field in custom_fields:
+        field_name = custom_field.name.strip()
+        if not field_name:
+            raise ValueError("Each enrichment.custom_fields entry must define a non-empty 'name'.")
+        if not _CUSTOM_FIELD_NAME_PATTERN.match(field_name):
+            raise ValueError(
+                f"Invalid custom field name '{custom_field.name}'. Use only letters, numbers, and underscores, and start with a letter or underscore."
+            )
+        if field_name in seen_names:
+            raise ValueError(f"Duplicate custom field name '{field_name}' in enrichment.custom_fields.")
+        if field_name.upper() in _RESERVED_SUMMARY_KEYS:
+            raise ValueError(
+                f"Custom field name '{field_name}' collides with built-in summarizer key '{field_name.upper()}'. Choose a different name."
+            )
+
+        if isinstance(custom_field.description, str):
+            description_lines = [line.strip() for line in custom_field.description.splitlines()]
+        elif isinstance(custom_field.description, list):
+            description_lines = [str(line).strip() for line in custom_field.description]
+        else:
+            raise ValueError(
+                f"Custom field '{field_name}' description must be a string or a list of strings."
+            )
+
+        description = "\n".join(line for line in description_lines if line)
+        if not description.strip():
+            raise ValueError(f"Custom field '{field_name}' must define a non-empty 'description'.")
+
+        custom_field.name = field_name
+        custom_field.description = description
+
+        if custom_field.type == "enum":
+            cleaned_options = [str(option).strip() for option in custom_field.options if str(option).strip()]
+            if not cleaned_options:
+                raise ValueError(f"Enum custom field '{field_name}' must define a non-empty 'options' list.")
+            deduplicated_options: list[str] = []
+            for option in cleaned_options:
+                if option not in deduplicated_options:
+                    deduplicated_options.append(option)
+            custom_field.options = deduplicated_options
+        elif custom_field.options:
+            raise ValueError(
+                f"Custom field '{field_name}' has type '{custom_field.type}' and cannot define 'options'. Only type 'enum' supports options."
+            )
+
+        seen_names.add(field_name)
+
+    return custom_fields
+
+
 def _build_config(data: dict[str, Any]) -> PipelineConfig:
     enrichment = data.pop("enrichment", {}) or {}
     enrichment_prompt = enrichment.pop("prompt", {}) or {}
+    enrichment_custom_fields = enrichment.pop("custom_fields", []) or []
     chunking = data.pop("chunking", {}) or {}
     embedding = data.pop("embedding", {}) or {}
     writer = data.pop("writer", {}) or {}
@@ -135,6 +236,7 @@ def _build_config(data: dict[str, Any]) -> PipelineConfig:
     config.enrichment = EnrichmentConfig(
         **enrichment,
         prompt=PromptConfig(**enrichment_prompt),
+        custom_fields=_build_custom_fields(enrichment_custom_fields),
     )
     config.chunking = ChunkingConfig(**chunking)
     config.embedding = EmbeddingConfig(**embedding)

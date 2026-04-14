@@ -53,11 +53,65 @@ OpenIngest is intentionally configurable at every stage.
 - **Config sources**: defaults, JSON/YAML config file, environment variables
 - **Chunking**: mode (`procedure`/`structure`/`window`/`semantic`), token targets, overlap, heading/keyword heuristics, OCR language
 - **Enrichment**: language strategy, image captions, summaries, synthetic questions, prompts
+- **Custom summarizer fields**: declare chunk-level dynamic fields (`enum`, `freelist`, `freeparagraph`) and have them generated during chunk enrichment
 - **Embedding**: model, dimensions, batch size, input template
 - **Pipeline control**: per-stage enablement (`extract`, `chunk`, `enrich_text`, `embed`, `write`, etc.)
 - **Writer mapping**: destination field mapping is configurable via `writer.mapping`
 
 This means the same core pipeline can be adapted to very different documentation styles, data contracts, and storage backends.
+
+### Custom summarizer fields
+
+You can declare custom fields in config and they will be injected into chunk summarization prompts dynamically.
+
+Each field declaration supports:
+
+- `name`: output field name (letters, numbers, underscore; starts with letter/underscore)
+- `type`: `enum` | `freelist` | `freeparagraph`
+- `description`: instruction for what the model should extract/generate
+- `required`: optional, default `false`
+- `options`: required for `enum`, forbidden for other types
+
+Example:
+
+```yaml
+enrichment:
+	custom_fields:
+		- name: app_id
+			type: enum
+			description:
+				- Classify the application identifier used by this chunk.
+				- Use the identifier that best matches the source application or business context.
+				- Return exactly one of the configured enum values.
+			required: true
+			options: ["1", "2", "3", "10"]
+
+		- name: impact_level
+			type: enum
+			description:
+				- Classify the operational impact severity of this chunk.
+				- Prefer the highest severity that is directly supported by the chunk content.
+			required: true
+			options: [low, medium, high]
+
+		- name: affected_modules
+			type: freelist
+			description:
+				- List all modules/systems explicitly mentioned as impacted.
+				- Use concise names only.
+
+		- name: operator_note
+			type: freeparagraph
+			description:
+				- Write a short operator-facing paragraph with the key caution.
+				- Keep it direct and actionable.
+```
+
+Generated values are stored in `text.custom_fields` in each output record, so writer mappings can target paths such as:
+
+- `text.custom_fields.impact_level`
+- `text.custom_fields.affected_modules`
+- `text.custom_fields.operator_note`
 
 ## Output Architecture (Oracle is an Example)
 
